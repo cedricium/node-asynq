@@ -1,14 +1,12 @@
 import path = require("node:path");
 import protobuf from "protobufjs";
 
-let TaskMessageType: protobuf.Type;
-run().catch(console.error);
-async function run() {
+let TaskMessageType: Promise<protobuf.Type> = (async () => {
   const root = await protobuf.load(
     path.join(__dirname, "..", "proto", "asynq.proto")
   );
-  TaskMessageType = root.lookupType("asynq.TaskMessage");
-}
+  return root.lookupType("asynq.TaskMessage");
+})();
 
 /**
  * TaskMessage is the internal representation of a task with additional metadata fields.
@@ -88,7 +86,7 @@ export class TaskMessage {
    */
   completed_at: number = 0;
 
-  static encodeMessage(message: TaskMessage) {
-    return TaskMessageType.encode(message).finish();
+  static async encodeMessage(message: TaskMessage) {
+    return (await TaskMessageType).encode(message).finish();
   }
 }

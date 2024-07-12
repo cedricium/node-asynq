@@ -1,8 +1,98 @@
 import { randomUUID } from "crypto";
+import { Redis } from "ioredis";
 import { Broker } from "./broker";
-import { DEFAULT_OPTIONS, Options } from "./options";
+import {
+  DEFAULT_OPTIONS,
+  DEFAULT_TIMEOUT,
+  NO_DEADLINE,
+  NO_TIMEOUT,
+  Options,
+} from "./options";
 import { Task } from "./task";
 import { TaskMessage } from "./task-message";
+import { TaskInfo, TaskState } from "./task-info";
+
+type RedisClientOpt = {
+  /**
+   * Network type to use, either tcp or unix.
+   * Default is tcp.
+   */
+  // network: string;
+
+  /** Redis server address in "host:port" format. */
+  // addr: string;
+
+  /**
+   * Redis server host. Default is "127.0.0.1"
+   * @default "127.0.0.1"
+   */
+  host?: string;
+
+  /**
+   * Redis server port. Default is 6739.
+   * @default 6379
+   */
+  port?: number;
+
+  /**
+   * Username to authenticate the current connection when Redis ACLs are used.
+   * See: https://redis.io/commands/auth.
+   */
+  username?: string;
+
+  /**
+   * Password to authenticate the current connection.
+   * See: https://redis.io/commands/auth.
+   */
+  password?: string;
+
+  /**
+   * Redis DB to select after connecting to a server.
+   * See: https://redis.io/commands/select.
+   */
+  db?: number;
+
+  /**
+   * Dial timeout for establishing new connections.
+   * Default is 5 seconds.
+   * @default 5
+   */
+  // dialTimeout: number;
+
+  /**
+   * Timeout for socket reads.
+   * If timeout is reached, read commands will fail with a timeout error
+   * instead of blocking.
+   *
+   * Use value -1 for no timeout and 0 for default.
+   * Default is 3 seconds.
+   * @default 3
+   */
+  // readTimeout: number;
+
+  /**
+   * Timeout for socket writes.
+   * If timeout is reached, write commands will fail with a timeout error
+   * instead of blocking.
+   *
+   * Use value -1 for no timeout and 0 for default.
+   * Default is ReadTimout.
+   */
+  // writeTimeout: number;
+
+  /**
+   * Maximum number of socket connections.
+   * Default is 10 connections per every CPU as reported by runtime.NumCPU.
+   * @default 10
+   */
+  // poolSize: number;
+
+  /**
+   * TLS Config used to connect to a server.
+   * TLS will be negotiated only if this field is set.
+   */
+  // tlsConfig: *tls.Config
+};
 
 /**
  * A Client is responsible for scheduling tasks.
@@ -11,8 +101,11 @@ import { TaskMessage } from "./task-message";
 export class Client {
   private broker;
 
-  constructor() {
-    this.broker = new Broker();
+  constructor(redisConnectOpt: RedisClientOpt);
+  constructor();
+  constructor(opts?: RedisClientOpt) {
+    const redis = opts ? new Redis(opts) : new Redis();
+    this.broker = new Broker(redis);
   }
 
   /**
@@ -27,21 +120,35 @@ export class Client {
    *
    * If no `opts.processAt` option is provided, the task will be pending immediately.
    */
-  async enqueue(task: Task, opts: Partial<Options>): Promise<void> {
-    const mergedOpts: Options = { ...DEFAULT_OPTIONS, ...task.opts, ...opts };
+  async enqueue(task: Task, opts?: Partial<Options>): Promise<TaskInfo> {
+    const options: Options = { ...DEFAULT_OPTIONS, ...task.opts, ...opts };
+
+    const deadline =
+      options.deadline !== NO_DEADLINE ? options.deadline : NO_DEADLINE;
+    let timeout = options.timeout !== NO_TIMEOUT ? options.timeout : NO_TIMEOUT;
+    if (deadline === NO_DEADLINE && timeout === NO_TIMEOUT) {
+      // If neither deadline nor timeout are set, use default timeout.
+      timeout = DEFAULT_TIMEOUT;
+    }
+
     const message = new TaskMessage();
     message.id = randomUUID();
     message.type = task.typeName;
     message.payload = task.payload;
-    message.queue = mergedOpts.queue;
-    message.retry = mergedOpts.retry;
-    message.timeout = mergedOpts.timeout;
-    message.deadline = mergedOpts.deadline;
+    message.queue = options.queue;
+    message.retry = options.retry < 0 ? 0 : options.retry;
+    message.timeout = timeout;
+    message.deadline = deadline;
 
-    if (mergedOpts.processAt <= Date.now()) {
-      await this.broker._enqueue(message);
+    let state;
+    if (options.processAt > Date.now()) {
+      state = TaskState.TaskStateScheduled;
+      await this.broker._schedule(message, options.processAt);
     } else {
-      await this.broker._schedule(message, mergedOpts.processAt);
+      state = TaskState.TaskStatePending;
+      await this.broker._enqueue(message);
     }
+
+    return new TaskInfo(message, state, options.processAt);
   }
 }

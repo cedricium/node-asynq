@@ -1,10 +1,8 @@
 import { AllQueues } from "./constants";
-import Redis, { Redis as ReddisInterface } from "ioredis";
+import { Redis, Redis as RedisInterface } from "ioredis";
 import { TaskMessage } from "./task-message";
 
-const redis = new Redis();
-
-interface CustomRedis extends ReddisInterface {
+interface RedisJobQueue extends RedisInterface {
   enqueue?(
     keys: string[],
     args: (string | number | Uint8Array)[]
@@ -20,10 +18,10 @@ interface CustomRedis extends ReddisInterface {
  * It is a client interface used to mutate task queues.
  */
 export class Broker {
-  private redis: CustomRedis;
+  private redis: RedisJobQueue;
 
-  constructor() {
-    this.redis = redis;
+  constructor(client: Redis) {
+    this.redis = client;
   }
 
   /** `_enqueue` adds the given task to the pending list of the queue. */
@@ -57,7 +55,7 @@ return 1`;
     const pendingKey = `asynq:{${message.queue}}:pending`;
     const keyList = [taskKey, pendingKey];
     const argList = [
-      TaskMessage.encodeMessage(message),
+      await TaskMessage.encodeMessage(message),
       message.id,
       Math.floor(Date.now() / 1000),
     ];
@@ -99,7 +97,7 @@ return 1`;
     const pendingKey = `asynq:{${message.queue}}:scheduled`;
     const keyList = [taskKey, pendingKey];
     const argList = [
-      TaskMessage.encodeMessage(message),
+      await TaskMessage.encodeMessage(message),
       Math.floor(processAt / 1000),
       message.id,
     ];

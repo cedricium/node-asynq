@@ -1,6 +1,6 @@
 {
   "name": "node-asynq",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Node.js client for the Asynq task queue library.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
