@@ -113,4 +113,22 @@ export class Broker {
 
     await this.redis.schedule(keyList, argList);
   }
+
+  /** `_batch` uses Redis pipeline to add tasks to the pending list of the queue. */
+  async _batch(messages: TaskMessage[]): Promise<void> {
+    const pipeline = this.redis.pipeline();
+
+    for (const message of messages) {
+      const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
+      const pendingKey = `asynq:{${message.queue}}:pending`;
+      const encodedMsg = await TaskMessage.encodeMessage(message);
+
+      const keyList = [taskKey, pendingKey];
+      const argList = [encodedMsg, message.id, Math.floor(Date.now() / 1000)];
+
+      pipeline.sadd(AllQueues, message.queue).enqueue(keyList, argList);
+    }
+
+    await pipeline.exec();
+  }
 }

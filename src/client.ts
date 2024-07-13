@@ -151,4 +151,43 @@ export class Client {
 
     return new TaskInfo(message, state, options.processAt);
   }
+
+  async bulkEnqueue(tasks: Task[], opts?: Partial<Options>): Promise<void> {
+    const messages = tasks.map((task) => {
+      const options: Options = { ...DEFAULT_OPTIONS, ...task.opts, ...opts };
+
+      const deadline =
+        options.deadline !== NO_DEADLINE ? options.deadline : NO_DEADLINE;
+      let timeout =
+        options.timeout !== NO_TIMEOUT ? options.timeout : NO_TIMEOUT;
+      if (deadline === NO_DEADLINE && timeout === NO_TIMEOUT) {
+        // If neither deadline nor timeout are set, use default timeout.
+        timeout = DEFAULT_TIMEOUT;
+      }
+
+      const message = new TaskMessage();
+      message.id = randomUUID();
+      message.type = task.typeName;
+      message.payload = task.payload;
+      message.queue = options.queue;
+      message.retry = options.retry < 0 ? 0 : options.retry;
+      message.timeout = timeout;
+      message.deadline = deadline;
+
+      return message;
+    });
+
+    await this.broker._batch(messages);
+
+    // let state;
+    // if (options.processAt > Date.now()) {
+    //   state = TaskState.TaskStateScheduled;
+    //   await this.broker._schedule(message, options.processAt);
+    // } else {
+    //   state = TaskState.TaskStatePending;
+    //   await this.broker._enqueue(message);
+    // }
+
+    // return new TaskInfo(message, state, options.processAt);
+  }
 }
