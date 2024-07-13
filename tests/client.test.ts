@@ -47,6 +47,27 @@ describe("Client Enqueue", () => {
     expect(got).toMatchObject(want);
   });
 
+  test("Schedule task using processAt", async () => {
+    const inTwoMins = Date.now() + 1000 * 60 * 2; // schedule for 2 mins from now
+    const opts: Partial<Options> = { processAt: inTwoMins };
+    const want: Partial<TaskInfo> = {
+      queue: DEFAULT_QUEUE,
+      type: task.typeName,
+      payload: task.payload,
+      state: TaskState.TaskStateScheduled,
+      maxRetry: DEFAULT_MAX_RETRY,
+      retried: 0,
+      lastErr: "",
+      lastFailedAt: 0,
+      timeout: DEFAULT_TIMEOUT,
+      deadline: DEFAULT_DEADLINE,
+      nextProcessAt: inTwoMins,
+    };
+    const got = await client.enqueue(task, opts);
+
+    expect(got).toMatchObject(want);
+  });
+
   test("Process task immediately with a custom retry count", async () => {
     const opts: Partial<Options> = { retry: 3 };
     const want: Partial<TaskInfo> = {
