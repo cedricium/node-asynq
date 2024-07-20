@@ -96,7 +96,8 @@ type RedisClientOpt = {
 
 /**
  * A Client is responsible for scheduling tasks.
- * A Client is used to register tasks that should be processed immediately or some time in the future.
+ * A Client is used to register tasks that should be processed immediately
+ * or some time in the future.
  */
 export class Client {
   private broker;
@@ -111,7 +112,8 @@ export class Client {
   /**
    * `enqueue` enqueues the given task to a queue.
    *
-   * `enqueue` returns TaskInfo and nil error if the task is enqueued successfully, otherwise returns a non-nil error.
+   * `enqueue` returns TaskInfo and nil error if the task is enqueued successfully,
+   * otherwise returns a non-nil error.
    *
    * The argument opts specifies the behavior of task processing.
    * If there are conflicting options values the last one overrides others.
@@ -152,9 +154,18 @@ export class Client {
     return new TaskInfo(message, state, options.processAt);
   }
 
-  async bulkEnqueue(tasks: Task[], opts?: Partial<Options>): Promise<void> {
-    const messages = tasks.map((task) => {
-      const options: Options = { ...DEFAULT_OPTIONS, ...task.opts, ...opts };
+  async bulkEnqueue(
+    tasks: Task[],
+    opts?: Partial<Options>
+  ): Promise<TaskInfo[]> {
+    const taskInfoList: TaskInfo[] = [];
+    const pendingMsgList: TaskMessage[] = [];
+    const scheduledMsgList: TaskMessage[] = [];
+
+    let options: Options = { ...DEFAULT_OPTIONS, ...opts };
+
+    for (const task of tasks) {
+      options = { ...options, ...task.opts };
 
       const deadline =
         options.deadline !== NO_DEADLINE ? options.deadline : NO_DEADLINE;
@@ -174,20 +185,23 @@ export class Client {
       message.timeout = timeout;
       message.deadline = deadline;
 
-      return message;
-    });
+      let info: TaskInfo;
+      if (options.processAt > Date.now()) {
+        const state = TaskState.TaskStateScheduled;
+        info = new TaskInfo(message, state, options.processAt);
+        scheduledMsgList.push(message);
+      } else {
+        const state = TaskState.TaskStatePending;
+        info = new TaskInfo(message, state, options.processAt);
+        pendingMsgList.push(message);
+      }
 
-    await this.broker._batch(messages);
+      taskInfoList.push(info);
+    }
 
-    // let state;
-    // if (options.processAt > Date.now()) {
-    //   state = TaskState.TaskStateScheduled;
-    //   await this.broker._schedule(message, options.processAt);
-    // } else {
-    //   state = TaskState.TaskStatePending;
-    //   await this.broker._enqueue(message);
-    // }
+    await this.broker._bulkQueue(pendingMsgList);
+    await this.broker._bulkSchedule(scheduledMsgList, opts?.processAt);
 
-    // return new TaskInfo(message, state, options.processAt);
+    return taskInfoList;
   }
 }

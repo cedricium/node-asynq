@@ -114,19 +114,44 @@ export class Broker {
     await this.redis.schedule(keyList, argList);
   }
 
-  /** `_batch` uses Redis pipeline to add tasks to the pending list of the queue. */
-  async _batch(messages: TaskMessage[]): Promise<void> {
+  /** `_bulkQueue` uses Redis pipeline to add tasks to the pending list of the queue. */
+  async _bulkQueue(messages: TaskMessage[]): Promise<void> {
     const pipeline = this.redis.pipeline();
 
     for (const message of messages) {
       const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
       const pendingKey = `asynq:{${message.queue}}:pending`;
       const encodedMsg = await TaskMessage.encodeMessage(message);
-
       const keyList = [taskKey, pendingKey];
       const argList = [encodedMsg, message.id, Math.floor(Date.now() / 1000)];
 
       pipeline.sadd(AllQueues, message.queue).enqueue(keyList, argList);
+    }
+
+    await pipeline.exec();
+  }
+
+  /**
+   * `_bulkSchedule` uses Redis pipeline to add tasks
+   * to the scheduled set to be processed in the future.
+   */
+  async _bulkSchedule(
+    messages: TaskMessage[],
+    processAt: number = Date.now()
+  ): Promise<void> {
+    const pipeline = this.redis.pipeline();
+
+    for (const message of messages) {
+      const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
+      const pendingKey = `asynq:{${message.queue}}:scheduled`;
+      const keyList = [taskKey, pendingKey];
+      const argList = [
+        await TaskMessage.encodeMessage(message),
+        Math.floor(processAt / 1000),
+        message.id,
+      ];
+
+      pipeline.sadd(AllQueues, message.queue).schedule(keyList, argList);
     }
 
     await pipeline.exec();
