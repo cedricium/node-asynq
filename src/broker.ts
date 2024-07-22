@@ -84,44 +84,44 @@ export class Broker {
     });
   }
 
-  /** `_enqueue` adds the given task to the pending list of the queue. */
-  async _enqueue(message: TaskMessage): Promise<void> {
-    await this.redis.sadd(AllQueues, message.queue);
+  private async prepareTask(message: TaskMessage): Promise<{
+    taskKey: string;
+    encodedMsg: Uint8Array;
+  }> {
     const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
+    const encodedMsg = await TaskMessage.encodeMessage(message);
+    return { taskKey, encodedMsg };
+  }
+
+  /** Adds the given task to the pending list of the queue. */
+  async enqueue(message: TaskMessage): Promise<void> {
+    const { taskKey, encodedMsg } = await this.prepareTask(message);
     const pendingKey = `asynq:{${message.queue}}:pending`;
     const keyList = [taskKey, pendingKey];
-    const argList = [
-      await TaskMessage.encodeMessage(message),
-      message.id,
-      Math.floor(Date.now() / 1000),
-    ];
+    const argList = [encodedMsg, message.id, Math.floor(Date.now() / 1000)];
 
+    await this.redis.sadd(AllQueues, message.queue);
     await this.redis.enqueue(keyList, argList);
   }
 
-  /** `_schedule` adds the task to the scheduled set to be processed in the future. */
-  async _schedule(message: TaskMessage, processAt: number): Promise<void> {
-    await this.redis.sadd(AllQueues, message.queue);
-    const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
+  /** Adds the task to the scheduled set to be processed in the future. */
+  async schedule(message: TaskMessage, processAt: number): Promise<void> {
+    const { taskKey, encodedMsg } = await this.prepareTask(message);
     const pendingKey = `asynq:{${message.queue}}:scheduled`;
     const keyList = [taskKey, pendingKey];
-    const argList = [
-      await TaskMessage.encodeMessage(message),
-      Math.floor(processAt / 1000),
-      message.id,
-    ];
+    const argList = [encodedMsg, Math.floor(processAt / 1000), message.id];
 
+    await this.redis.sadd(AllQueues, message.queue);
     await this.redis.schedule(keyList, argList);
   }
 
-  /** `_bulkQueue` uses Redis pipeline to add tasks to the pending list of the queue. */
-  async _bulkQueue(messages: TaskMessage[]): Promise<void> {
+  /** `Uses Redis pipeline to add tasks to the pending list of the queue. */
+  async bulkQueue(messages: TaskMessage[]): Promise<void> {
     const pipeline = this.redis.pipeline();
 
     for (const message of messages) {
-      const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
+      const { taskKey, encodedMsg } = await this.prepareTask(message);
       const pendingKey = `asynq:{${message.queue}}:pending`;
-      const encodedMsg = await TaskMessage.encodeMessage(message);
       const keyList = [taskKey, pendingKey];
       const argList = [encodedMsg, message.id, Math.floor(Date.now() / 1000)];
 
@@ -132,24 +132,20 @@ export class Broker {
   }
 
   /**
-   * `_bulkSchedule` uses Redis pipeline to add tasks
-   * to the scheduled set to be processed in the future.
+   * Uses Redis pipeline to add tasks to the
+   * scheduled set to be processed in the future.
    */
-  async _bulkSchedule(
+  async bulkSchedule(
     messages: TaskMessage[],
     processAt: number = Date.now()
   ): Promise<void> {
     const pipeline = this.redis.pipeline();
 
     for (const message of messages) {
-      const taskKey = `asynq:{${message.queue}}:t:${message.id}`;
+      const { taskKey, encodedMsg } = await this.prepareTask(message);
       const pendingKey = `asynq:{${message.queue}}:scheduled`;
       const keyList = [taskKey, pendingKey];
-      const argList = [
-        await TaskMessage.encodeMessage(message),
-        Math.floor(processAt / 1000),
-        message.id,
-      ];
+      const argList = [encodedMsg, Math.floor(processAt / 1000), message.id];
 
       pipeline.sadd(AllQueues, message.queue).schedule(keyList, argList);
     }
