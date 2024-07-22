@@ -95,9 +95,8 @@ type RedisClientOpt = {
 };
 
 /**
- * A Client is responsible for scheduling tasks.
- * A Client is used to register tasks that should be processed immediately
- * or some time in the future.
+ * Responsible for scheduling tasks. Is used to register tasks that
+ * should be processed immediately or some time in the future.
  */
 export class Client {
   private broker: Broker;
@@ -141,10 +140,7 @@ export class Client {
   }
 
   /**
-   * `enqueue` enqueues the given task to a queue.
-   *
-   * `enqueue` returns TaskInfo and nil error if the task is enqueued successfully,
-   * otherwise returns a non-nil error.
+   * Enqueues the given task to a queue.
    *
    * The argument opts specifies the behavior of task processing.
    * If there are conflicting options values the last one overrides others.
@@ -167,6 +163,7 @@ export class Client {
     return new TaskInfo(message, state, options.processAt);
   }
 
+  /** Atomically enqueues a group of tasks to a queue. See `enqueue` for options handling. */
   async bulkEnqueue(
     tasks: Task[],
     opts?: Partial<Options>
