@@ -95,23 +95,52 @@ type RedisClientOpt = {
 };
 
 /**
- * A Client is responsible for scheduling tasks.
- * A Client is used to register tasks that should be processed immediately or some time in the future.
+ * Responsible for scheduling tasks. Is used to register tasks that
+ * should be processed immediately or some time in the future.
  */
 export class Client {
-  private broker;
+  private broker: Broker;
 
-  constructor(redisConnectOpt: RedisClientOpt);
-  constructor();
-  constructor(opts?: RedisClientOpt) {
-    const redis = opts ? new Redis(opts) : new Redis();
+  constructor(redisConnectOpt?: RedisClientOpt) {
+    const redis = redisConnectOpt ? new Redis(redisConnectOpt) : new Redis();
     this.broker = new Broker(redis);
   }
 
+  private createTaskMessage(task: Task, options: Options): TaskMessage {
+    const message = new TaskMessage();
+    message.id = randomUUID();
+    message.type = task.typeName;
+    message.payload = task.payload;
+    message.queue = options.queue;
+    message.retry = Math.max(0, options.retry);
+    message.timeout = this.getTimeout(options);
+    message.deadline =
+      options.deadline !== NO_DEADLINE ? options.deadline : NO_DEADLINE;
+    return message;
+  }
+
+  private getTimeout(options: Options): number {
+    if (options.deadline === NO_DEADLINE && options.timeout === NO_TIMEOUT) {
+      return DEFAULT_TIMEOUT;
+    }
+    return options.timeout !== NO_TIMEOUT ? options.timeout : NO_TIMEOUT;
+  }
+
+  private getTaskState(processAt: number): TaskState {
+    return processAt > Date.now()
+      ? TaskState.TaskStateScheduled
+      : TaskState.TaskStatePending;
+  }
+
+  private mergeOptions(
+    taskOpts?: Partial<Options>,
+    enqueueOpts?: Partial<Options>
+  ): Options {
+    return { ...DEFAULT_OPTIONS, ...taskOpts, ...enqueueOpts };
+  }
+
   /**
-   * `enqueue` enqueues the given task to a queue.
-   *
-   * `enqueue` returns TaskInfo and nil error if the task is enqueued successfully, otherwise returns a non-nil error.
+   * Enqueues the given task to a queue.
    *
    * The argument opts specifies the behavior of task processing.
    * If there are conflicting options values the last one overrides others.
@@ -121,34 +150,47 @@ export class Client {
    * If no `opts.processAt` option is provided, the task will be pending immediately.
    */
   async enqueue(task: Task, opts?: Partial<Options>): Promise<TaskInfo> {
-    const options: Options = { ...DEFAULT_OPTIONS, ...task.opts, ...opts };
+    const options = this.mergeOptions(task.opts, opts);
+    const message = this.createTaskMessage(task, options);
+    const state = this.getTaskState(options.processAt);
 
-    const deadline =
-      options.deadline !== NO_DEADLINE ? options.deadline : NO_DEADLINE;
-    let timeout = options.timeout !== NO_TIMEOUT ? options.timeout : NO_TIMEOUT;
-    if (deadline === NO_DEADLINE && timeout === NO_TIMEOUT) {
-      // If neither deadline nor timeout are set, use default timeout.
-      timeout = DEFAULT_TIMEOUT;
-    }
-
-    const message = new TaskMessage();
-    message.id = randomUUID();
-    message.type = task.typeName;
-    message.payload = task.payload;
-    message.queue = options.queue;
-    message.retry = options.retry < 0 ? 0 : options.retry;
-    message.timeout = timeout;
-    message.deadline = deadline;
-
-    let state;
-    if (options.processAt > Date.now()) {
-      state = TaskState.TaskStateScheduled;
-      await this.broker._schedule(message, options.processAt);
+    if (state === TaskState.TaskStateScheduled) {
+      await this.broker.schedule(message, options.processAt);
     } else {
-      state = TaskState.TaskStatePending;
-      await this.broker._enqueue(message);
+      await this.broker.enqueue(message);
     }
 
     return new TaskInfo(message, state, options.processAt);
+  }
+
+  /** Atomically enqueues a group of tasks to a queue. See `enqueue` for options handling. */
+  async bulkEnqueue(
+    tasks: Task[],
+    opts?: Partial<Options>
+  ): Promise<TaskInfo[]> {
+    const taskInfoList: TaskInfo[] = [];
+    const messages: { pending: TaskMessage[]; scheduled: TaskMessage[] } = {
+      pending: [],
+      scheduled: [],
+    };
+
+    for (const task of tasks) {
+      const options = this.mergeOptions(task.opts, opts);
+      const message = this.createTaskMessage(task, options);
+      const state = this.getTaskState(options.processAt);
+
+      if (state === TaskState.TaskStateScheduled) {
+        messages.scheduled.push(message);
+      } else {
+        messages.pending.push(message);
+      }
+
+      taskInfoList.push(new TaskInfo(message, state, options.processAt));
+    }
+
+    await this.broker.bulkQueue(messages.pending);
+    await this.broker.bulkSchedule(messages.scheduled, opts?.processAt);
+
+    return taskInfoList;
   }
 }

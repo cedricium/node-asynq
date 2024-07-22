@@ -1,6 +1,6 @@
 {
   "name": "node-asynq",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Node.js client for the Asynq task queue library.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,6 +11,10 @@
   },
   "author": "Cedric Amaya <amaya.cedric@gmail.com> (https://cedthe.dev)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cedricium/node-asynq.git"
+  },
   "dependencies": {
     "ioredis": "^5.4.1",
     "protobufjs": "^7.3.2"
